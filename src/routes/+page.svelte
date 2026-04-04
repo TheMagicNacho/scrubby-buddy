@@ -417,7 +417,7 @@
 		position: fixed;
 		top: 1rem;
 		right: 1rem;
-		animation: gentleFloat 4s ease-in-out infinate;
+		animation: gentleFloat 4s ease-in-out infinite;
 		border: none;
 	}
 	.hamburger-menu p {
