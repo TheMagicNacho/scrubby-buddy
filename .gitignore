@@ -3,3 +3,5 @@ node_modules
 .svelte-kit
 package-lock.json
 .vscode
+**/__screenshots__
+.vitest-attachments
