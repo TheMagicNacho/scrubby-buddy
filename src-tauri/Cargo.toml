@@ -31,3 +31,21 @@ img-parts = "0.4.0"
 rand = {version = "0.9", features= ["os_rng"] }
 kamadak-exif = "0.6.1"
 
+# ── Formal verification ────────────────────────────────────────────────────────
+# Kani is used to formally verify critical functions (see `src/lib.rs`,
+# `#[cfg(kani)] mod kani_proofs`).
+#
+# One-time dev-tool setup:
+#   cargo install --locked kani-verifier
+#
+# Running the proofs:
+#   cargo kani                              # verify all harnesses
+#   cargo kani --harness <harness_name>     # verify a single harness
+#
+# Reference: https://github.com/model-checking/kani
+
+# Tell cargo that `cfg(kani)` is a known, intentional configuration flag set
+# by the Kani toolchain (suppresses the `unexpected_cfgs` lint).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
