@@ -2,6 +2,8 @@ import { page } from 'vitest/browser';
 import { describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import Page from '../../routes/+page.svelte';
+import * as dialog from '@tauri-apps/plugin-dialog';
+import * as core from '@tauri-apps/api/core';
 
 vi.mock('@tauri-apps/api/core', () => ({
 	invoke: vi.fn()
@@ -107,6 +109,38 @@ describe('+page.svelte', () => {
 
 			// Assert
 			await expect.element(page.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
+		});
+	});
+
+	describe('Inspect view', () => {
+		it('renders the select image button when on the inspect tab', async () => {
+			// Arrange
+			await render(Page);
+
+			// Act — switch to inspect view
+			await page.getByRole('button', { name: 'Inspect' }).click({ force: true });
+
+			// Assert
+			await expect.element(page.getByRole('button', { name: 'Select Image' })).toBeInTheDocument();
+		});
+
+		it('displays a metadata table after an image is inspected', async () => {
+			// Arrange
+			vi.mocked(dialog.open).mockResolvedValue('/fake/image.jpg');
+			vi.mocked(core.invoke).mockResolvedValue([
+				['Camera Make', 'Canon'],
+				['Camera Model', 'EOS R5']
+			]);
+			await render(Page);
+
+			// Act — switch to inspect view and select an image
+			await page.getByRole('button', { name: 'Inspect' }).click({ force: true });
+			await page.getByRole('button', { name: 'Select Image' }).click({ force: true });
+
+			// Assert — the metadata table is visible with the expected data
+			await expect.element(page.getByRole('table')).toBeInTheDocument();
+			await expect.element(page.getByText('Camera Make')).toBeInTheDocument();
+			await expect.element(page.getByText('Canon')).toBeInTheDocument();
 		});
 	});
 });

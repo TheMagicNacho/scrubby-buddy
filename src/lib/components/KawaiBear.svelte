@@ -79,12 +79,9 @@
 		bottom: 20px;
 		left: 20px;
 		z-index: 1000;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
 	}
 
-	/* Speech bubble */
+	/* Speech bubble — absolutely positioned above the bear so it never shifts the bear */
 	.speech-bubble {
 		background: linear-gradient(135deg, #ffffff 0%, #ffd6e0 100%);
 		border-radius: 20px;
@@ -92,8 +89,10 @@
 		padding: 15px 20px;
 		max-width: 200px;
 		box-shadow: 0 8px 25px rgba(255, 20, 147, 0.15);
-		position: relative;
-		margin-bottom: 8px;
+		position: absolute;
+		bottom: 100%;
+		left: 0;
+		margin-bottom: 18px;
 	}
 
 	.speech-bubble::before {
