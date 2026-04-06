@@ -1,0 +1,5 @@
+# Kani model-checker configuration.
+# Enable the experimental async support so that kani::block_on can be used
+# in proof harnesses to drive async functions.
+[workspace]
+unstable_features = ["async-lib"]

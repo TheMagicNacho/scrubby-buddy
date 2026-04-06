@@ -76,7 +76,7 @@ async fn gather_files(path: &PathBuf) -> Vec<String> {
     files
 }
 
-fn remove_metadata_jpeg(input_bytes: Vec<u8>) -> Result<ImageReturn, Error> {
+async fn remove_metadata_jpeg(input_bytes: Vec<u8>) -> Result<ImageReturn, Error> {
     // Parse the JPEG structure from the byte array
     // This does NOT decode the actual image pixels, so it's fast and lossless
     let mut jpeg = img_parts::jpeg::Jpeg::from_bytes(input_bytes.into()).unwrap();
@@ -154,7 +154,7 @@ async fn make_write_dir(path: &PathBuf, new_dir: &str) -> Result<PathBuf, Error>
 
 /// There is the 32! propbability of a collision, so if there is a collision detected we'll
 /// regenerate a new filename.
-fn generate_filename(save_directory: &PathBuf) -> std::io::Result<(PathBuf, File)> {
+async fn generate_filename(save_directory: &PathBuf) -> std::io::Result<(PathBuf, File)> {
     loop {
         let new_name = {
             let mut rng = rand::rng();
@@ -272,8 +272,8 @@ async fn scrub_images(path: &str, save_directory: &str) -> Result<String, ()> {
         match guess_format(&data).unwrap() {
             image::ImageFormat::Jpeg => {
                 let input_data = std::fs::read(file).unwrap();
-                let output_data = remove_metadata_jpeg(input_data).unwrap();
-                let new_path = generate_filename(&save_directory).unwrap();
+                let output_data = remove_metadata_jpeg(input_data).await.unwrap();
+                let new_path = generate_filename(&save_directory).await.unwrap();
 
                 stats.add(&output_data);
                 std::fs::write(new_path.0, output_data.img_data).unwrap();
@@ -373,20 +373,41 @@ mod kani_proofs {
             .write_to(&mut input_bytes)
             .expect("JPEG encoding must succeed");
 
-        // Call remove_metadata_jpeg directly.
-        let result =
-            remove_metadata_jpeg(input_bytes).expect("remove_metadata_jpeg must succeed");
+        // Call remove_metadata_jpeg directly (async fn driven by kani::block_on).
+        let result = kani::block_on(remove_metadata_jpeg(input_bytes))
+            .expect("remove_metadata_jpeg must succeed");
 
-        // ── Core property ──────────────────────────────────────────────────
-        // After processing, the output JPEG must contain no EXIF data.
+        // ── Core properties ────────────────────────────────────────────────
+        // Parse the output so we can inspect its segments.
         let output_jpeg =
             img_parts::jpeg::Jpeg::from_bytes(result.img_data.into())
                 .expect("output must be a valid JPEG");
 
+        // 1. No EXIF data present.
         assert!(
             output_jpeg.exif().is_none(),
             "EXIF must be removed after processing"
         );
+
+        // 2. Only image-critical segments are allowed; all metadata is gone.
+        let allowed: &[u8] = &[
+            img_parts::jpeg::markers::SOI,
+            img_parts::jpeg::markers::EOI,
+            img_parts::jpeg::markers::SOF0,
+            img_parts::jpeg::markers::SOF2,
+            img_parts::jpeg::markers::DQT,
+            img_parts::jpeg::markers::DHT,
+            img_parts::jpeg::markers::DRI,
+            img_parts::jpeg::markers::SOS,
+            img_parts::jpeg::markers::APP0,
+            img_parts::jpeg::markers::APP14,
+        ];
+        for segment in output_jpeg.segments() {
+            assert!(
+                allowed.contains(&segment.marker()),
+                "output contains a non-image segment after scrubbing"
+            );
+        }
     }
 
     /// Formally verify that `remove_metadata_jpeg` removes an ICC profile for
@@ -410,9 +431,9 @@ mod kani_proofs {
             .write_to(&mut input_bytes)
             .expect("JPEG encoding must succeed");
 
-        // Call remove_metadata_jpeg directly.
-        let result =
-            remove_metadata_jpeg(input_bytes).expect("remove_metadata_jpeg must succeed");
+        // Call remove_metadata_jpeg directly (async fn driven by kani::block_on).
+        let result = kani::block_on(remove_metadata_jpeg(input_bytes))
+            .expect("remove_metadata_jpeg must succeed");
 
         let output_jpeg =
             img_parts::jpeg::Jpeg::from_bytes(result.img_data.into())
@@ -427,18 +448,15 @@ mod kani_proofs {
 
     /// Formally verify that `generate_filename` always produces a path whose
     /// file-system extension is `"jpeg"`, for every possible `u32` random value.
-    ///
-    /// `generate_filename` generates a random `u32`, formats it as a string,
-    /// and appends `.jpeg`.  Kani replaces the random number with a symbolic
-    /// `u32` so this holds for **all** 2^32 possible values at once.
     #[kani::proof]
     fn proof_generate_filename_has_jpeg_extension() {
         // Create a real temporary directory so the file-creation succeeds.
         let dir = std::path::PathBuf::from("/tmp/kani_proof_generate_filename");
         std::fs::create_dir_all(&dir).ok();
 
-        // Call generate_filename directly.
-        let (path, _file) = generate_filename(&dir).expect("generate_filename must succeed");
+        // Call generate_filename directly (async fn driven by kani::block_on).
+        let (path, _file) = kani::block_on(generate_filename(&dir))
+            .expect("generate_filename must succeed");
 
         // ── Core property ──────────────────────────────────────────────────
         // The extension reported by the OS path API must always be "jpeg".
@@ -456,8 +474,9 @@ mod kani_proofs {
         let dir = std::path::PathBuf::from("/tmp/kani_proof_generate_filename_stem");
         std::fs::create_dir_all(&dir).ok();
 
-        // Call generate_filename directly.
-        let (path, _file) = generate_filename(&dir).expect("generate_filename must succeed");
+        // Call generate_filename directly (async fn driven by kani::block_on).
+        let (path, _file) = kani::block_on(generate_filename(&dir))
+            .expect("generate_filename must succeed");
 
         // ── Core property ──────────────────────────────────────────────────
         // The stem (name without extension) must never be empty.
