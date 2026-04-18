@@ -25,7 +25,20 @@ cargo check              # Check Rust for errors
 cargo clippy             # Rust linter. Lint must pass prior to reviews.
 ```
 
-There are no automated tests. `npm run check` / `svelte-check` is the primary validation tool for the frontend.
+## Pre-submission Checklist
+
+Before pushing any code changes, always run both formatters:
+
+```bash
+# Backend — Rust formatter (from src-tauri/)
+cargo fmt
+
+# Frontend — Prettier formatter (from repo root)
+npm run lint --fix
+# or: npx prettier --write .
+```
+
+Both `cargo fmt --check` (Backend Lint) and `npm run lint` (Frontend Lint) are enforced in CI and will block merges if formatting is off.
 
 ## Architecture
 

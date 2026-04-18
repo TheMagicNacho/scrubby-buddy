@@ -61,6 +61,30 @@ jobs:
         run: cargo clippy -- -D warnings
         working-directory: src-tauri
 
+  kani:
+    name: Kani Formal Verification
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Run Kani proofs
+        uses: model-checking/kani-github-action@v1.1
+        with:
+          working-directory: src-tauri
+          args: "-Z async-lib"
+
   sbom:
     name: SBOM & Vulnerability Scan
     runs-on: ubuntu-latest

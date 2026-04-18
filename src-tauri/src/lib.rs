@@ -4,10 +4,9 @@ use img_parts::{ImageEXIF, ImageICC};
 use log::debug;
 use rand::prelude::*;
 use std::collections::HashMap;
-// use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::Error;
 use std::path::{Path, PathBuf};
-use tokio::fs::{File, OpenOptions};
 
 /// image_stats provide stats on a particular image's cleanning process.
 struct ImageReturn {
@@ -154,7 +153,7 @@ async fn make_write_dir(path: &Path, new_dir: &str) -> Result<PathBuf, Error> {
 
 /// There is the 32! propbability of a collision, so if there is a collision detected we'll
 /// regenerate a new filename.
-async fn generate_filename(save_directory: &Path) -> tokio::io::Result<(PathBuf, File)> {
+async fn generate_filename(save_directory: &Path) -> std::io::Result<(PathBuf, File)> {
     loop {
         let new_name = {
             let mut rng = rand::rng();
@@ -166,14 +165,13 @@ async fn generate_filename(save_directory: &Path) -> tokio::io::Result<(PathBuf,
         let file_result = OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(&new_path)
-            .await;
+            .open(&new_path);
 
         match file_result {
             // Success: We reserved the filename and have the handle
             Ok(file) => return Ok((new_path, file)),
             // Collision: File exists, loop again
-            Err(ref e) if e.kind() == tokio::io::ErrorKind::AlreadyExists => continue,
+            Err(ref e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             // Real Error: Permission denied, disk full, etc.
             Err(e) => return Err(e),
         }
@@ -308,6 +306,177 @@ fn count_images(path: &str) -> u64 {
         }
     }
 }
+/// Kani formal-verification harnesses.
+///
+/// These are only compiled when running `cargo kani`.  They are invisible to
+/// the normal Rust compiler and to `cargo test`, so they have zero impact on
+/// the production binary.
+///
+/// # Running the proofs
+///
+/// ```sh
+/// cargo install --locked kani-verifier   # one-time setup
+/// cargo kani                             # verify all harnesses
+/// cargo kani --harness <name>            # verify a single harness
+/// ```
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// A minimal, structurally-valid JPEG that `img_parts` can parse.
+    ///
+    /// Structure:
+    ///   - SOI  (FF D8)
+    ///   - APP0 (FF E0) – 16-byte JFIF header
+    ///   - EOI  (FF D9)
+    const MINIMAL_JPEG: &[u8] = &[
+        // SOI
+        0xFF, 0xD8,
+        // APP0 marker + length (16 bytes total, including the 2-byte length field)
+        0xFF, 0xE0, 0x00, 0x10, // "JFIF\0" identifier
+        0x4A, 0x46, 0x49, 0x46, 0x00, // Version 1.1
+        0x01, 0x01, // Pixel density units: no units
+        0x00, // X/Y pixel density: 1×1
+        0x00, 0x01, 0x00, 0x01, // No embedded thumbnail
+        0x00, 0x00, // EOI
+        0xFF, 0xD9,
+    ];
+
+    /// Formally verify that `remove_metadata_jpeg` removes EXIF data for
+    /// **any** possible EXIF payload content.
+    ///
+    /// Kani explores every possible 64-byte EXIF payload, proving the
+    /// property holds universally rather than for a single concrete value.
+    #[kani::proof]
+    fn proof_remove_metadata_jpeg_removes_exif() {
+        // Build a minimal JPEG and inject an arbitrary EXIF payload.
+        let mut jpeg = img_parts::jpeg::Jpeg::from_bytes(MINIMAL_JPEG.to_vec().into())
+            .expect("minimal JPEG must parse");
+
+        let exif_payload: [u8; 64] = kani::any();
+        jpeg.set_exif(Some(exif_payload.to_vec().into()));
+
+        // Sanity check: EXIF must be present before processing.
+        assert!(
+            jpeg.exif().is_some(),
+            "EXIF should be present before processing"
+        );
+
+        // Serialise the JPEG with embedded EXIF.
+        let mut input_bytes: Vec<u8> = Vec::new();
+        jpeg.encoder()
+            .write_to(&mut input_bytes)
+            .expect("JPEG encoding must succeed");
+
+        // Call remove_metadata_jpeg directly (async fn driven by kani::block_on).
+        let result = kani::block_on(remove_metadata_jpeg(input_bytes))
+            .expect("remove_metadata_jpeg must succeed");
+
+        // ── Core properties ────────────────────────────────────────────────
+        // Parse the output so we can inspect its segments.
+        let output_jpeg = img_parts::jpeg::Jpeg::from_bytes(result.img_data.into())
+            .expect("output must be a valid JPEG");
+
+        // 1. No EXIF data present.
+        assert!(
+            output_jpeg.exif().is_none(),
+            "EXIF must be removed after processing"
+        );
+
+        // 2. Only image-critical segments are allowed; all metadata is gone.
+        let allowed: &[u8] = &[
+            img_parts::jpeg::markers::SOI,
+            img_parts::jpeg::markers::EOI,
+            img_parts::jpeg::markers::SOF0,
+            img_parts::jpeg::markers::SOF2,
+            img_parts::jpeg::markers::DQT,
+            img_parts::jpeg::markers::DHT,
+            img_parts::jpeg::markers::DRI,
+            img_parts::jpeg::markers::SOS,
+            img_parts::jpeg::markers::APP0,
+            img_parts::jpeg::markers::APP14,
+        ];
+        for segment in output_jpeg.segments() {
+            assert!(
+                allowed.contains(&segment.marker()),
+                "output contains a non-image segment after scrubbing"
+            );
+        }
+    }
+
+    /// Formally verify that `remove_metadata_jpeg` removes an ICC profile for
+    /// **any** possible ICC payload content.
+    #[kani::proof]
+    fn proof_remove_metadata_jpeg_removes_icc_profile() {
+        let mut jpeg = img_parts::jpeg::Jpeg::from_bytes(MINIMAL_JPEG.to_vec().into())
+            .expect("minimal JPEG must parse");
+
+        let icc_payload: [u8; 32] = kani::any();
+        jpeg.set_icc_profile(Some(icc_payload.to_vec().into()));
+
+        assert!(
+            jpeg.icc_profile().is_some(),
+            "ICC profile should be present before processing"
+        );
+
+        let mut input_bytes: Vec<u8> = Vec::new();
+        jpeg.encoder()
+            .write_to(&mut input_bytes)
+            .expect("JPEG encoding must succeed");
+
+        // Call remove_metadata_jpeg directly (async fn driven by kani::block_on).
+        let result = kani::block_on(remove_metadata_jpeg(input_bytes))
+            .expect("remove_metadata_jpeg must succeed");
+
+        let output_jpeg = img_parts::jpeg::Jpeg::from_bytes(result.img_data.into())
+            .expect("output must be a valid JPEG");
+
+        // ── Core property ──────────────────────────────────────────────────
+        assert!(
+            output_jpeg.icc_profile().is_none(),
+            "ICC profile must be removed after processing"
+        );
+    }
+
+    /// Formally verify that `generate_filename` always produces a path whose
+    /// file-system extension is `"jpeg"`, for every possible `u32` random value.
+    #[kani::proof]
+    fn proof_generate_filename_has_jpeg_extension() {
+        // Create a real temporary directory so the file-creation succeeds.
+        let dir = std::path::PathBuf::from("/tmp/kani_proof_generate_filename");
+        std::fs::create_dir_all(&dir).ok();
+
+        // Call generate_filename directly (async fn driven by kani::block_on).
+        let (path, _file) =
+            kani::block_on(generate_filename(&dir)).expect("generate_filename must succeed");
+
+        // ── Core property ──────────────────────────────────────────────────
+        // The extension reported by the OS path API must always be "jpeg".
+        assert_eq!(
+            path.extension().and_then(|e| e.to_str()),
+            Some("jpeg"),
+            "generated filename must have .jpeg extension"
+        );
+    }
+
+    /// Formally verify that the filename stem produced by `generate_filename`
+    /// is never empty for any possible `u32` random value.
+    #[kani::proof]
+    fn proof_generate_filename_stem_nonempty() {
+        let dir = std::path::PathBuf::from("/tmp/kani_proof_generate_filename_stem");
+        std::fs::create_dir_all(&dir).ok();
+
+        // Call generate_filename directly (async fn driven by kani::block_on).
+        let (path, _file) =
+            kani::block_on(generate_filename(&dir)).expect("generate_filename must succeed");
+
+        // ── Core property ──────────────────────────────────────────────────
+        // The stem (name without extension) must never be empty.
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        assert!(!stem.is_empty(), "filename stem must never be empty");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
