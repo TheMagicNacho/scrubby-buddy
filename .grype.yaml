@@ -1,0 +1,4 @@
+db:
+  # Allow a vulnerability database up to 30 days old before refusing to scan.
+  # The default (5 days) causes failures in CI environments with stale caches.
+  max-allowed-built-age: 720h

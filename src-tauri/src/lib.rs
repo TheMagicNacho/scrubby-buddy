@@ -308,6 +308,201 @@ fn count_images(path: &str) -> u64 {
         }
     }
 }
+/// # Running the tests
+///
+/// These tests require no external services or environment setup. From the
+/// `src-tauri/` directory run:
+///
+/// ```bash
+/// cargo test
+/// ```
+///
+/// To see live output (e.g. `println!` / `eprintln!` statements) pass the
+/// `--nocapture` flag:
+///
+/// ```bash
+/// cargo test -- --nocapture
+/// ```
+///
+/// To run a single test by name:
+///
+/// ```bash
+/// cargo test tests::test_gather_files_finds_all_jpegs
+/// cargo test tests::test_scrub_removes_metadata_from_test_images
+/// ```
+///
+/// The test assets live in `src-tauri/tests/assets/` and are committed to the
+/// repository — no extra download step is required.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    /// Returns the path to the committed test-asset directory.
+    /// `env!("CARGO_MANIFEST_DIR")` resolves to `src-tauri/` at compile time,
+    /// so the assets are always located relative to the crate root regardless
+    /// of where `cargo test` is invoked from.
+    fn assets_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("assets")
+    }
+
+    /// Count how many JPEG segments contain metadata (everything that
+    /// `remove_metadata_jpeg` is supposed to strip).
+    fn count_metadata_segments(jpeg: &img_parts::jpeg::Jpeg) -> usize {
+        use img_parts::jpeg::markers;
+        jpeg.segments()
+            .iter()
+            .filter(|s| {
+                !matches!(
+                    s.marker(),
+                    markers::SOI
+                        | markers::EOI
+                        | markers::SOF0
+                        | markers::SOF2
+                        | markers::DQT
+                        | markers::DHT
+                        | markers::DRI
+                        | markers::SOS
+                        | markers::APP0
+                        | markers::APP14
+                )
+            })
+            .count()
+    }
+
+    // -----------------------------------------------------------------------
+    // Test: gather_files discovers all four test images
+    //
+    // Verifies that `gather_files` correctly walks a directory and returns
+    // every file whose extension matches a supported JPEG extension (.jpg /
+    // .jpeg). The assets directory contains exactly 4 test images.
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn test_gather_files_finds_all_jpegs() {
+        let assets = assets_dir();
+        assert!(
+            assets.exists(),
+            "Test asset directory does not exist: {:?}",
+            assets
+        );
+
+        let files = gather_files(&assets).await;
+
+        assert_eq!(
+            files.len(),
+            4,
+            "Expected 4 JPEG files in assets dir, found {}",
+            files.len()
+        );
+
+        let expected = ["burger.jpg", "tacos.jpg", "white1.jpeg", "white2.jpeg"];
+        for name in &expected {
+            assert!(
+                files.iter().any(|f| f.ends_with(name)),
+                "Expected to find {} in gathered files",
+                name
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Test: remove_metadata_jpeg strips all metadata from the test images
+    //
+    // For each test asset the test:
+    //   1. Confirms the original file contains EXIF data and strippable
+    //      metadata segments.
+    //   2. Calls `remove_metadata_jpeg` to scrub the file in memory.
+    //   3. Writes the cleaned bytes to a temporary directory (auto-deleted
+    //      via `tempfile::TempDir`'s RAII drop, even if the test panics).
+    //   4. Re-reads the written file and asserts that no EXIF remains and
+    //      that the total number of metadata segments has decreased.
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn test_scrub_removes_metadata_from_test_images() {
+        let assets = assets_dir();
+        // `tempfile::TempDir` removes the directory automatically when dropped,
+        // ensuring cleanup even if an assertion panics mid-loop.
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+
+        let test_images = ["burger.jpg", "tacos.jpg", "white1.jpeg", "white2.jpeg"];
+
+        for img_name in &test_images {
+            let img_path = assets.join(img_name);
+            assert!(img_path.exists(), "Asset not found: {:?}", img_path);
+
+            // --- Read original bytes ---
+            let original_bytes =
+                fs::read(&img_path).unwrap_or_else(|_| panic!("Failed to read {:?}", img_path));
+
+            // --- Inspect metadata before scrubbing ---
+            let original_jpeg = img_parts::jpeg::Jpeg::from_bytes(original_bytes.clone().into())
+                .unwrap_or_else(|_| panic!("Failed to parse JPEG: {}", img_name));
+
+            let has_exif_before = original_jpeg.exif().is_some();
+            let metadata_segments_before = count_metadata_segments(&original_jpeg);
+
+            assert!(
+                has_exif_before,
+                "Test image '{}' should contain EXIF metadata before scrubbing",
+                img_name
+            );
+            assert!(
+                metadata_segments_before > 0,
+                "Test image '{}' should have metadata segments before scrubbing",
+                img_name
+            );
+
+            // --- Remove metadata ---
+            let result = remove_metadata_jpeg(original_bytes.clone())
+                .await
+                .unwrap_or_else(|e| panic!("remove_metadata_jpeg failed for {}: {}", img_name, e));
+
+            // The cleaned output must be strictly smaller than the original
+            // because at least the EXIF APP1 segment was removed.
+            assert!(
+                result.img_data.len() < original_bytes.len(),
+                "Cleaned '{}' ({} bytes) should be smaller than original ({} bytes)",
+                img_name,
+                result.img_data.len(),
+                original_bytes.len()
+            );
+
+            // --- Write cleaned image to temp directory ---
+            let output_path = temp_dir.path().join(img_name);
+            fs::write(&output_path, &result.img_data)
+                .unwrap_or_else(|e| panic!("Failed to write cleaned image {}: {}", img_name, e));
+
+            // --- Inspect metadata after scrubbing ---
+            let cleaned_bytes = fs::read(&output_path)
+                .unwrap_or_else(|_| panic!("Failed to read cleaned {:?}", output_path));
+
+            let cleaned_jpeg = img_parts::jpeg::Jpeg::from_bytes(cleaned_bytes.into())
+                .unwrap_or_else(|_| panic!("Failed to parse cleaned JPEG: {}", img_name));
+
+            assert!(
+                cleaned_jpeg.exif().is_none(),
+                "Cleaned image '{}' should have no EXIF data",
+                img_name
+            );
+
+            let metadata_segments_after = count_metadata_segments(&cleaned_jpeg);
+            assert!(
+                metadata_segments_after < metadata_segments_before,
+                "Cleaned image '{}' should have fewer metadata segments ({} < {})",
+                img_name,
+                metadata_segments_after,
+                metadata_segments_before
+            );
+        }
+
+        // `temp_dir` is dropped here, which automatically removes the temp
+        // directory and all cleaned images written into it.
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()

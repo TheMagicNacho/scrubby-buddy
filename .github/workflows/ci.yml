@@ -88,7 +88,7 @@ jobs:
 
       - name: Scan SBOM for vulnerabilities
         id: scan
-        uses: anchore/scan-action@v3
+        uses: anchore/scan-action@v7
         with:
           sbom: sbom.json
           fail-build: true
