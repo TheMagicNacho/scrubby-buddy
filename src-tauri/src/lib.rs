@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use image::guess_format;
 use img_parts::{ImageEXIF, ImageICC};
 use log::debug;
@@ -5,7 +6,7 @@ use rand::prelude::*;
 use std::collections::HashMap;
 // use std::fs::File;
 use std::io::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::fs::{File, OpenOptions};
 
 /// image_stats provide stats on a particular image's cleanning process.
@@ -50,15 +51,13 @@ fn is_image(path: PathBuf) -> bool {
     .cloned()
     .collect();
 
-    if let Some(extension) = path.extension() {
-        if let Some(ext_str) = extension.to_str() {
-            return img_extensions.contains_key(&ext_str.to_lowercase()[..]);
-        }
+    if let Some(ext_str) = path.extension().and_then(|e| e.to_str()) {
+        return img_extensions.contains_key(&ext_str.to_lowercase()[..]);
     }
     false
 }
 
-async fn gather_files(path: &PathBuf) -> Vec<String> {
+async fn gather_files(path: &Path) -> Vec<String> {
     let mut files: Vec<String> = Vec::new();
     match tokio::fs::read_dir(path).await {
         Ok(mut dir) => {
@@ -134,17 +133,17 @@ async fn remove_metadata_jpeg(input_bytes: Vec<u8>) -> Result<ImageReturn, Error
 }
 
 // creates a directory to store new files within the given path
-async fn make_write_dir(path: &PathBuf, new_dir: &str) -> Result<PathBuf, Error> {
-    let mut new_path = path.clone();
+async fn make_write_dir(path: &Path, new_dir: &str) -> Result<PathBuf, Error> {
+    let mut new_path = path.to_path_buf();
 
     new_path.push(new_dir);
     // println!("Creating new directory at {:?}", new_path);
     match tokio::fs::create_dir(&new_path).await {
         Ok(_) => Ok(new_path),
         Err(e) => {
-            if e.kind() == std::io::ErrorKind::AlreadyExists {
-                Ok(new_path)
-            } else if e.kind() == std::io::ErrorKind::DirectoryNotEmpty {
+            if e.kind() == std::io::ErrorKind::AlreadyExists
+                || e.kind() == std::io::ErrorKind::DirectoryNotEmpty
+            {
                 Ok(new_path)
             } else {
                 Err(e)
@@ -155,7 +154,7 @@ async fn make_write_dir(path: &PathBuf, new_dir: &str) -> Result<PathBuf, Error>
 
 /// There is the 32! propbability of a collision, so if there is a collision detected we'll
 /// regenerate a new filename.
-async fn generate_filename(save_directory: &PathBuf) -> tokio::io::Result<(PathBuf, File)> {
+async fn generate_filename(save_directory: &Path) -> tokio::io::Result<(PathBuf, File)> {
     loop {
         let new_name = {
             let mut rng = rand::rng();

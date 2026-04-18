@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "0w0 Scrubby Buddy",
-        "width": 800,
+        "width": 1000,
         "height": 600,
         "minHeight": 500,
-        "minWidth": 700
+        "minWidth": 800
 
       }
     ],

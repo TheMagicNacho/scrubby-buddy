@@ -10,6 +10,12 @@
 </script>
 
 <div class="bear-container">
+	{#if message && state === 'talking'}
+		<div class="speech-bubble">
+			<p>{message}</p>
+			<div class="bubble-tail"></div>
+		</div>
+	{/if}
 	<div
 		class="bear"
 		class:looking={state === 'looking'}
@@ -73,9 +79,77 @@
 		bottom: 20px;
 		left: 20px;
 		z-index: 1000;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
+	}
+
+	/* Speech bubble — absolutely positioned above the bear so it never shifts the bear */
+	.speech-bubble {
+		background: linear-gradient(135deg, #ffffff 0%, #ffd6e0 100%);
+		border-radius: 20px;
+		border: 3px solid #ffb6c1;
+		padding: 15px 20px;
+		max-width: 200px;
+		box-shadow: 0 8px 25px rgba(255, 20, 147, 0.15);
+		position: absolute;
+		bottom: 100%;
+		left: 0;
+		margin-bottom: 18px;
+	}
+
+	.speech-bubble::before {
+		content: '💭';
+		position: absolute;
+		top: -10px;
+		right: -10px;
+		font-size: 1.2em;
+		animation: sparkle 2s ease-in-out infinite;
+	}
+
+	.speech-bubble p {
+		margin: 0;
+		font-size: 13px;
+		font-weight: 600;
+		color: #4a0e4e;
+		line-height: 1.4;
+		font-family: 'Nunito', sans-serif;
+	}
+
+	.bubble-tail {
+		position: absolute;
+		bottom: -15px;
+		left: 20px;
+		width: 0;
+		height: 0;
+		border-left: 15px solid transparent;
+		border-right: 15px solid transparent;
+		border-top: 15px solid #ffb6c1;
+	}
+
+	.bubble-tail::after {
+		content: '';
+		position: absolute;
+		bottom: 3px;
+		left: -12px;
+		width: 0;
+		height: 0;
+		border-left: 12px solid transparent;
+		border-right: 12px solid transparent;
+		border-top: 12px solid #ffffff;
+	}
+
+	/* Dark mode support */
+	@media (prefers-color-scheme: dark) {
+		.speech-bubble {
+			background: #3a3a3a;
+			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+		}
+
+		.speech-bubble p {
+			color: #f6f6f6;
+		}
+
+		.bubble-tail {
+			border-top-color: #3a3a3a;
+		}
 	}
 
 	.bear {
@@ -444,21 +518,5 @@
 
 	.foot.right {
 		right: 5px;
-	}
-
-	/* Dark mode support */
-	@media (prefers-color-scheme: dark) {
-		.speech-bubble {
-			background: #3a3a3a;
-			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-		}
-
-		.speech-bubble p {
-			color: #f6f6f6;
-		}
-
-		.bubble-tail {
-			border-top-color: #3a3a3a;
-		}
 	}
 </style>

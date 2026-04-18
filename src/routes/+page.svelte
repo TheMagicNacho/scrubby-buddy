@@ -303,12 +303,6 @@
 	{/if}
 
 	<div class="bear">
-		{#if bearMessage && bearState === 'talking'}
-			<div class="speech-bubble" transition:fly={{ y: 10, duration: 200 }}>
-				<p>{bearMessage}</p>
-				<div class="bubble-tail"></div>
-			</div>
-		{/if}
 		<KawaiBear message={bearMessage} state={bearState} />
 	</div>
 </main>
@@ -320,63 +314,6 @@
 		bottom: 1.5rem;
 		left: 1.5rem;
 		width: 200px;
-	}
-
-	/** Speech bubble styles **/
-	.speech-bubble {
-		background: linear-gradient(135deg, var(--kawaii-white) 0%, var(--kawaii-pastel-pink) 100%);
-		border-radius: 20px;
-		border: 3px solid var(--kawaii-soft-pink);
-		padding: 15px 20px;
-		max-width: 200px;
-		box-shadow: 0 8px 25px var(--kawaii-shadow);
-		position: absolute;
-		bottom: 8rem;
-		left: 1.5rem;
-		order: 2;
-		animation: gentleFloat 3s ease-in-out infinite;
-		position: relative;
-	}
-
-	.speech-bubble::before {
-		content: '💭';
-		position: absolute;
-		top: -10px;
-		right: -10px;
-		font-size: 1.2em;
-		animation: sparkle 2s ease-in-out infinite;
-	}
-
-	.speech-bubble p {
-		margin: 0;
-		font-size: 13px;
-		font-weight: 600;
-		color: var(--kawaii-text-dark);
-		line-height: 1.4;
-		font-family: 'Nunito', sans-serif;
-	}
-
-	.bubble-tail {
-		position: absolute;
-		bottom: -15px;
-		left: 20px;
-		width: 0;
-		height: 0;
-		border-left: 15px solid transparent;
-		border-right: 15px solid transparent;
-		border-top: 15px solid var(--kawaii-soft-pink);
-	}
-
-	.bubble-tail::after {
-		content: '';
-		position: absolute;
-		bottom: 3px;
-		left: -12px;
-		width: 0;
-		height: 0;
-		border-left: 12px solid transparent;
-		border-right: 12px solid transparent;
-		border-top: 12px solid var(--kawaii-white);
 	}
 
 	/** Hamburger menu styles **/

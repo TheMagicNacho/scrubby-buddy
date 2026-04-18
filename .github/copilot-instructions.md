@@ -39,7 +39,10 @@ The app is split across a Svelte frontend and a Rust backend connected via Tauri
 
 ```ts
 // Frontend
-const result = await invoke('scrub_images', { path: folderPath, saveDirectory });
+const result = await invoke('scrub_images', {
+	path: folderPath,
+	saveDirectory
+});
 ```
 
 ```rust
