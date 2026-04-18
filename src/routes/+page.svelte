@@ -403,14 +403,6 @@
 			inset 0 0 20px #fff,
 			0 0 90px #fff;
 
-		/**
-      inset 10px 0 46px var(--kawaii-soft-pink),
-      inset 88px 0px 60px var(--kawaii-hot-pink),
-      inset -20px -60px 100px var(--kawaii-pastel-pink),
-      inset 0 50px 140px var(--kawaii-hot-pink),
-      0 0 90px #fff;
-
-      **/
 		display: flex;
 		align-items: center;
 		justify-content: center;
