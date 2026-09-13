@@ -20,3 +20,72 @@ You can also inspect photos before and after i do the srubbby dubbies so you hav
 1. click the inspect tab button
 2. select a photo
 3. I'll show you allll the metadata that I can find in your phoootooo oooooweeeeoooooo
+
+# Development & Quality Checks
+
+Run the following commands locally to validate changes before pushing:
+
+- **Frontend formatting check**: `npm run lint`
+- **Frontend auto-format**: `npm run format`
+- **TypeScript & Svelte type check**: `npm run check`
+- **Frontend unit tests**: `npm test`
+- **Rust backend formatting**: `cargo fmt --check` (in `src-tauri`)
+- **Rust backend linter**: `cargo clippy -- -D warnings` (in `src-tauri`)
+- **Frontend production build**: `npm run build`
+- **Tauri desktop build**: `npx tauri build`
+
+# Release
+
+This project uses an automated multi-platform CI/CD pipeline to package installers and publish GitHub Releases.
+
+## Release Tagging Convention
+
+Releases follow the convention `r<number>.<number>.<number>` (for example, `r1.0.0`, `r0.1.0`).
+
+## How to Create a Release
+
+You can trigger a release using either a Git tag or a release branch:
+
+### Option A: Using a Release Tag (Recommended)
+
+1. Ensure your local `main` branch is up to date and all changes are committed:
+   ```bash
+   git checkout main
+   git pull origin main
+   ```
+2. Create a release tag matching the convention:
+   ```bash
+   git tag r1.0.0
+   ```
+3. Push the release tag to GitHub:
+   ```bash
+   git push origin r1.0.0
+   ```
+
+### Option B: Using a Release Branch
+
+1. Create a release branch named with the release convention:
+   ```bash
+   git checkout -b r1.0.0
+   ```
+2. Push the release branch to GitHub:
+   ```bash
+   git push origin r1.0.0
+   ```
+
+## What the Automated Pipeline Does
+
+Once a release tag or branch matching `r*.*.*` is pushed to GitHub:
+
+1. **Validation**: The pipeline runs code quality checks:
+   - Frontend formatting (`prettier`) and TypeScript type-checking (`svelte-check`).
+   - Rust backend formatting (`rustfmt`) and linter checks (`cargo clippy`).
+   - Frontend unit tests with Playwright.
+2. **Multi-Platform Packaging**: A build matrix compiles and packages native installers concurrently across:
+   - **Windows** (`windows-latest`): Produces the Windows MSI installer (`.msi`).
+   - **macOS** (`macos-latest`): Produces the macOS DMG installer (`.dmg`).
+   - **Linux** (`ubuntu-22.04`): Produces Linux Debian packages (`.deb`) and AppImages (`.AppImage`).
+3. **Artifact Storage & Release Publishing**:
+   - Stores all built platform installers as GitHub Actions artifacts (30-day retention).
+   - Detects the release marker, creates/updates the release tag, and publishes a new GitHub Release via `softprops/action-gh-release@v2`.
+   - Attaches the macOS DMG, Linux DEB & AppImage, and Windows MSI installers, along with auto-generated release notes and marking it as the latest release.
