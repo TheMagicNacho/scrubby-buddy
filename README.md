@@ -9,6 +9,7 @@ There are a lot of bad people in the world, and they can use the information hid
 This is an easy to use tool to help remove all the hiden meta data from your photos before you post it.
 You can also inspect photos before and after i do the srubbby dubbies so you have confidence in them.
 
+![screenshot](static/screenshot.png)
 # How to scrub
 
 1. Select a folder of photos.
