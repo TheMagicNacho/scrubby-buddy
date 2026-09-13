@@ -1,0 +1,102 @@
+name: Dev Branch Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches-ignore:
+      - main
+      - 'r*.*.*'
+    tags-ignore:
+      - '**'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  validate:
+    name: Lint, Test & Security
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install System Dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workdir: src-tauri
+
+      - name: Install Node Dependencies
+        run: npm install
+
+      - name: Frontend Formatting Check (Prettier)
+        run: npm run lint
+
+      - name: Type Check (svelte-check)
+        run: npm run check
+
+      - name: Rust Formatting Check (rustfmt)
+        run: cargo fmt --check
+        working-directory: src-tauri
+
+      - name: Rust Linting (Clippy)
+        run: cargo clippy -- -D warnings
+        working-directory: src-tauri
+
+      - name: Install Playwright Browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Run Unit Tests
+        run: npm test
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./
+          format: cyclonedx-json
+          output-file: sbom.json
+          artifact-name: cyclonedx-sbom
+          upload-artifact: true
+
+      - name: Scan SBOM for Vulnerabilities
+        id: scan
+        uses: anchore/scan-action@v3
+        with:
+          sbom: sbom.json
+          fail-build: true
+          severity-cutoff: critical
+          output-format: sarif
+
+      - name: Upload Vulnerability Report to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && steps.scan.outputs.sarif != ''
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}

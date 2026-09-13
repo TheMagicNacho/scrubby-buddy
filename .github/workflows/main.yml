@@ -1,0 +1,312 @@
+name: Main CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - 'r*.*.*'
+    tags:
+      - 'r*.*.*'
+
+permissions:
+  contents: write
+  security-events: write
+  actions: read
+
+jobs:
+  validate:
+    name: Lint, Test & Security
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install System Dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workdir: src-tauri
+
+      - name: Install Node Dependencies
+        run: npm install
+
+      - name: Frontend Formatting Check (Prettier)
+        run: npm run lint
+
+      - name: Type Check (svelte-check)
+        run: npm run check
+
+      - name: Rust Formatting Check (rustfmt)
+        run: cargo fmt --check
+        working-directory: src-tauri
+
+      - name: Rust Linting (Clippy)
+        run: cargo clippy -- -D warnings
+        working-directory: src-tauri
+
+      - name: Install Playwright Browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Run Unit Tests
+        run: npm test
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./
+          format: cyclonedx-json
+          output-file: sbom.json
+          artifact-name: cyclonedx-sbom
+          upload-artifact: true
+
+      - name: Scan SBOM for Vulnerabilities
+        id: scan
+        uses: anchore/scan-action@v3
+        with:
+          sbom: sbom.json
+          fail-build: true
+          severity-cutoff: critical
+          output-format: sarif
+
+      - name: Upload Vulnerability Report to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && steps.scan.outputs.sarif != ''
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+
+  build:
+    name: Build & Package (${{ matrix.platform }})
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            bundles: msi
+            artifact-name: scrubby-buddy-windows
+            installer-path: src-tauri/target/release/bundle/msi/*.msi
+          - os: macos-latest
+            platform: macos
+            bundles: dmg
+            artifact-name: scrubby-buddy-macos
+            installer-path: src-tauri/target/release/bundle/dmg/*.dmg
+          - os: ubuntu-22.04
+            platform: linux
+            bundles: deb,appimage
+            artifact-name: scrubby-buddy-linux
+            installer-path: |
+              src-tauri/target/release/bundle/deb/*.deb
+              src-tauri/target/release/bundle/appimage/*.AppImage
+              src-tauri/target/release/bundle/appimage/*.appimage
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workdir: src-tauri
+
+      - name: Install System Dependencies (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libfuse2
+
+      - name: Install Node Dependencies
+        run: npm install
+
+      - name: Build Application and Package Installer
+        run: npx tauri build --bundles ${{ matrix.bundles }} --ignore-version-mismatches
+
+      - name: Upload Platform Installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.installer-path }}
+          retention-days: 30
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Release Tag
+        id: detect_release
+        shell: pwsh
+        env:
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = ""
+          $tagRegex = '^r\d+\.\d+\.\d+(?:-[0-9a-zA-Z.-]+)?$'
+          $pattern = '(?i)\b(r\d+\.\d+\.\d+(?:-[0-9a-zA-Z.-]+)?)\b'
+
+          # 1. Check github.ref / github.ref_name if triggered by tag or branch push
+          if ($env:GITHUB_REF -match '^refs/tags/(r\d+\.\d+\.\d+(?:-[0-9a-zA-Z.-]+)?)$') {
+            $tag = $Matches[1]
+            Write-Host "Detected release tag from GITHUB_REF: $tag"
+          } elseif ($env:GITHUB_REF -match '^refs/heads/(r\d+\.\d+\.\d+(?:-[0-9a-zA-Z.-]+)?)$') {
+            $tag = $Matches[1]
+            Write-Host "Detected release branch from GITHUB_REF: $tag"
+          } elseif ($env:GITHUB_REF_NAME -match $tagRegex) {
+            $tag = $env:GITHUB_REF_NAME
+            Write-Host "Detected release marker from GITHUB_REF_NAME: $tag"
+          }
+
+          # 2. Check git tags pointing at HEAD
+          if (-not $tag) {
+            $headTags = git tag --points-at HEAD
+            if ($headTags) {
+              $matching = @($headTags) | ForEach-Object { "$_".Trim() } | Where-Object { $_ -match $tagRegex }
+              if ($matching) {
+                $tag = $matching[0]
+                Write-Host "Detected release tag pointing at HEAD: $tag"
+              }
+            }
+          }
+
+          # 3. Check git tags pointing at merged parent (if HEAD is a merge commit)
+          if (-not $tag) {
+            $isMerge = $false
+            try {
+              $out = git rev-parse -q --verify "HEAD^2" 2>$null
+              if ($LASTEXITCODE -eq 0 -and $out) {
+                $isMerge = $true
+              }
+            } catch {
+              $isMerge = $false
+            }
+            if ($isMerge) {
+              $mergeTags = git tag --points-at HEAD^2
+              if ($mergeTags) {
+                $matching = @($mergeTags) | ForEach-Object { "$_".Trim() } | Where-Object { $_ -match $tagRegex }
+                if ($matching) {
+                  $tag = $matching[0]
+                  Write-Host "Detected release tag pointing at HEAD^2: $tag"
+                }
+              }
+            }
+          }
+
+          # 4. Check commit message and merge commit references
+          if (-not $tag) {
+            $rawMsg = git log -1 --pretty=%B
+            $commitMsg = if ($rawMsg -is [array]) { $rawMsg -join "`n" } else { [string]$rawMsg }
+            if ($commitMsg) {
+              $match = [regex]::Match($commitMsg, $pattern)
+              if ($match.Success -and $match.Groups.Count -gt 1) {
+                $endPos = $match.Index + $match.Length
+                $nextChar = if ($endPos -lt $commitMsg.Length) { $commitMsg[$endPos] } else { '' }
+                if ($nextChar -ne '/' -and $nextChar -ne '.') {
+                  $candidate = $match.Groups[1].Value.TrimEnd('.', ',', ';', ':')
+                  if ($candidate -match $tagRegex) {
+                    $tag = $candidate
+                    Write-Host "Detected release tag from commit message: $tag"
+                  }
+                }
+              }
+            }
+          }
+
+          if ($tag) {
+            $existingTag = git tag -l $tag
+            if (-not $existingTag) {
+              git tag $tag HEAD 2>$null
+              try {
+                git push origin "refs/tags/$tag" 2>$null
+              } catch {}
+            }
+            "release_tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            "is_release=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Write-Host "Release detected: $tag"
+          } else {
+            "is_release=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Write-Host "No matching release tag detected."
+          }
+
+      - name: Download Built Installers
+        if: steps.detect_release.outputs.is_release == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scrubby-buddy-*
+          path: release-installers
+          merge-multiple: true
+
+      - name: Publish Release
+        if: steps.detect_release.outputs.is_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.detect_release.outputs.release_tag }}
+          name: ${{ steps.detect_release.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            release-installers/*.dmg
+            release-installers/*.deb
+            release-installers/*.AppImage
+            release-installers/*.appimage
+            release-installers/*.msi
+            release-installers/**/*.dmg
+            release-installers/**/*.deb
+            release-installers/**/*.AppImage
+            release-installers/**/*.appimage
+            release-installers/**/*.msi
+          generate_release_notes: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
