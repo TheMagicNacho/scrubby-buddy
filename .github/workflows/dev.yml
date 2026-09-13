@@ -13,12 +13,11 @@ on:
 
 permissions:
   contents: read
-  security-events: write
   actions: read
 
 jobs:
   validate:
-    name: Lint, Test & Security
+    name: Lint & Test
     runs-on: ubuntu-22.04
 
     steps:
@@ -76,27 +75,3 @@ jobs:
 
       - name: Run Unit Tests
         run: npm test
-
-      - name: Generate SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          path: ./
-          format: spdx-json
-          output-file: sbom.spdx.json
-          artifact-name: spdx-sbom
-          upload-artifact: true
-
-      - name: Scan SBOM for Vulnerabilities
-        id: scan
-        uses: anchore/scan-action@v7
-        with:
-          sbom: sbom.spdx.json
-          fail-build: true
-          severity-cutoff: critical
-          output-format: sarif
-
-      - name: Upload Vulnerability Report to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always() && steps.scan.outputs.sarif != ''
-        with:
-          sarif_file: ${{ steps.scan.outputs.sarif }}

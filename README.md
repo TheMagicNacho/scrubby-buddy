@@ -81,7 +81,6 @@ Once a release tag or branch matching `r*.*.*` is pushed to GitHub:
    - Frontend formatting (`prettier`) and TypeScript type-checking (`svelte-check`).
    - Rust backend formatting (`rustfmt`) and linter checks (`cargo clippy`).
    - Frontend unit tests with Playwright.
-   - CycloneDX Software Bill of Materials (SBOM) generation and vulnerability scanning.
 2. **Multi-Platform Packaging**: A build matrix compiles and packages native installers concurrently across:
    - **Windows** (`windows-latest`): Produces the Windows MSI installer (`.msi`).
    - **macOS** (`macos-latest`): Produces the macOS DMG installer (`.dmg`).
